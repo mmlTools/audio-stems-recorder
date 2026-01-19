@@ -12,6 +12,8 @@
 #include <QDoubleSpinBox>
 #include <QSpinBox>
 #include <QPushButton>
+#include <QSizePolicy>
+#include <QToolBox>
 
 #include <obs-module.h>
 
@@ -42,110 +44,130 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
 {
 	setWindowTitle(tr("Audio Stems Recorder"));
 	setModal(true);
-	resize(720, 520);
+	resize(760, 560);
 
 	auto *root = new QVBoxLayout();
 	setLayout(root);
 
-	// Triggers
-	auto *gbTriggers = new QGroupBox(tr("Triggers"));
-	auto *trig = new QVBoxLayout();
-	gbTriggers->setLayout(trig);
+	// Accordion-style layout
+	auto *toolbox = new QToolBox();
+	toolbox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+	root->addWidget(toolbox, 1);
 
-	chk_recording_ = new QCheckBox(tr("Capture when Recording starts/stops"));
-	chk_streaming_ = new QCheckBox(tr("Capture when Streaming starts/stops"));
-	trig->addWidget(chk_recording_);
-	trig->addWidget(chk_streaming_);
-	root->addWidget(gbTriggers);
+	// Triggers (page)
+	{
+		auto *page = new QWidget();
+		auto *trig = new QVBoxLayout();
+		page->setLayout(trig);
+		chk_recording_ = new QCheckBox(tr("Capture when Recording starts/stops"));
+		chk_streaming_ = new QCheckBox(tr("Capture when Streaming starts/stops"));
+		trig->addWidget(chk_recording_);
+		trig->addWidget(chk_streaming_);
+		trig->addStretch(1);
+		toolbox->addItem(page, tr("Triggers"));
+	}
 
-	// Output
-	auto *gbOut = new QGroupBox(tr("Output"));
-	auto *out = new QVBoxLayout();
-	gbOut->setLayout(out);
+	// Output (page)
+	{
+		auto *page = new QWidget();
+		auto *out = new QVBoxLayout();
+		page->setLayout(out);
 
-	auto *rowDir = new QHBoxLayout();
-	rowDir->addWidget(new QLabel(tr("Output folder")));
-	edit_output_ = new QLineEdit();
-	rowDir->addWidget(edit_output_, 1);
-	auto *btnBrowseDir = new QPushButton(tr("Browse"));
-	connect(btnBrowseDir, &QPushButton::clicked, this, &SettingsDialog::on_browse_output);
-	rowDir->addWidget(btnBrowseDir);
-	out->addLayout(rowDir);
+		auto *rowDir = new QHBoxLayout();
+		rowDir->addWidget(new QLabel(tr("Output folder")));
+		edit_output_ = new QLineEdit();
+		rowDir->addWidget(edit_output_, 1);
+		auto *btnBrowseDir = new QPushButton(tr("Browse"));
+		connect(btnBrowseDir, &QPushButton::clicked, this, &SettingsDialog::on_browse_output);
+		rowDir->addWidget(btnBrowseDir);
+		out->addLayout(rowDir);
+		out->addStretch(1);
 
-	root->addWidget(gbOut);
+		toolbox->addItem(page, tr("Output"));
+	}
 
-	// Processing
-	auto *gbProc = new QGroupBox(tr("Processing"));
-	auto *proc = new QVBoxLayout();
-	gbProc->setLayout(proc);
+	// Sources (page)
+	{
+		auto *page = new QWidget();
+		auto *src = new QVBoxLayout();
+		page->setLayout(src);
 
-	chk_trim_ = new QCheckBox(tr("Trim silence"));
-	proc->addWidget(chk_trim_);
-	auto *rowTrim = new QHBoxLayout();
-	rowTrim->addWidget(new QLabel(tr("Threshold (dBFS)")));
-	spin_trim_thr_ = new QDoubleSpinBox();
-	spin_trim_thr_->setRange(-90.0, -1.0);
-	spin_trim_thr_->setDecimals(1);
-	rowTrim->addWidget(spin_trim_thr_);
-	rowTrim->addWidget(new QLabel(tr("Lead (ms)")));
-	spin_lead_ms_ = new QSpinBox();
-	spin_lead_ms_->setRange(0, 5000);
-	rowTrim->addWidget(spin_lead_ms_);
-	rowTrim->addWidget(new QLabel(tr("Trail (ms)")));
-	spin_trail_ms_ = new QSpinBox();
-	spin_trail_ms_->setRange(0, 5000);
-	rowTrim->addWidget(spin_trail_ms_);
-	rowTrim->addStretch(1);
-	proc->addLayout(rowTrim);
+		auto *rowBtns = new QHBoxLayout();
+		auto *btnAll = new QPushButton(tr("Select all"));
+		auto *btnNone = new QPushButton(tr("Select none"));
+		connect(btnAll, &QPushButton::clicked, this, &SettingsDialog::on_select_all_sources);
+		connect(btnNone, &QPushButton::clicked, this, &SettingsDialog::on_select_none_sources);
+		rowBtns->addWidget(btnAll);
+		rowBtns->addWidget(btnNone);
+		rowBtns->addStretch(1);
+		src->addLayout(rowBtns);
 
-	chk_norm_ = new QCheckBox(tr("Normalize audio"));
-	proc->addWidget(chk_norm_);
-	auto *rowNorm = new QHBoxLayout();
-	rowNorm->addWidget(new QLabel(tr("Target (dBFS)")));
-	spin_norm_target_ = new QDoubleSpinBox();
-	spin_norm_target_->setRange(-60.0, -1.0);
-	spin_norm_target_->setDecimals(1);
-	rowNorm->addWidget(spin_norm_target_);
-	chk_limiter_ = new QCheckBox(tr("Limiter (prevent clipping)"));
-	rowNorm->addWidget(chk_limiter_);
-	rowNorm->addStretch(1);
-	proc->addLayout(rowNorm);
+		chk_use_aliases_ = new QCheckBox(tr("Use custom file names (aliases)"));
+		src->addWidget(chk_use_aliases_);
 
-	chk_sidecar_ = new QCheckBox(tr("Write session.json sidecar"));
-	chk_scene_markers_ = new QCheckBox(tr("Record scene change markers"));
-	proc->addWidget(chk_sidecar_);
-	proc->addWidget(chk_scene_markers_);
+		table_sources_ = new QTableWidget();
+		table_sources_->setColumnCount(3);
+		table_sources_->setHorizontalHeaderLabels({tr("Record"), tr("Source"), tr("Alias (optional)")});
+		table_sources_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+		table_sources_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+		table_sources_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+		table_sources_->verticalHeader()->setVisible(false);
+		table_sources_->setSelectionMode(QAbstractItemView::NoSelection);
+		table_sources_->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
+		src->addWidget(table_sources_, 1);
 
-	root->addWidget(gbProc);
+		toolbox->addItem(page, tr("Audio Sources"));
+	}
 
-	// Sources
-	auto *gbSources = new QGroupBox(tr("Audio Sources"));
-	auto *src = new QVBoxLayout();
-	gbSources->setLayout(src);
+	// Processing (page)
+	{
+		auto *page = new QWidget();
+		auto *proc = new QVBoxLayout();
+		page->setLayout(proc);
 
-	auto *rowBtns = new QHBoxLayout();	auto *btnAll = new QPushButton(tr("Select all"));	auto *btnNone = new QPushButton(tr("Select none"));
-	connect(btnAll, &QPushButton::clicked, this, &SettingsDialog::on_select_all_sources);
-	connect(btnNone, &QPushButton::clicked, this, &SettingsDialog::on_select_none_sources);
-	rowBtns->addWidget(btnAll);
-	rowBtns->addWidget(btnNone);
-	rowBtns->addStretch(1);
-	src->addLayout(rowBtns);
+		chk_trim_ = new QCheckBox(tr("Trim silence"));
+		proc->addWidget(chk_trim_);
+		auto *rowTrim = new QHBoxLayout();
+		rowTrim->addWidget(new QLabel(tr("Threshold (dBFS)")));
+		spin_trim_thr_ = new QDoubleSpinBox();
+		spin_trim_thr_->setRange(-90.0, -1.0);
+		spin_trim_thr_->setDecimals(1);
+		rowTrim->addWidget(spin_trim_thr_);
+		rowTrim->addWidget(new QLabel(tr("Lead (ms)")));
+		spin_lead_ms_ = new QSpinBox();
+		spin_lead_ms_->setRange(0, 5000);
+		rowTrim->addWidget(spin_lead_ms_);
+		rowTrim->addWidget(new QLabel(tr("Trail (ms)")));
+		spin_trail_ms_ = new QSpinBox();
+		spin_trail_ms_->setRange(0, 5000);
+		rowTrim->addWidget(spin_trail_ms_);
+		rowTrim->addStretch(1);
+		proc->addLayout(rowTrim);
 
-	chk_use_aliases_ = new QCheckBox(tr("Use custom file names (aliases)"));
-	src->addWidget(chk_use_aliases_);
+		chk_norm_ = new QCheckBox(tr("Normalize audio"));
+		proc->addWidget(chk_norm_);
+		auto *rowNorm = new QHBoxLayout();
+		rowNorm->addWidget(new QLabel(tr("Target (dBFS)")));
+		spin_norm_target_ = new QDoubleSpinBox();
+		spin_norm_target_->setRange(-60.0, -1.0);
+		spin_norm_target_->setDecimals(1);
+		rowNorm->addWidget(spin_norm_target_);
+		chk_limiter_ = new QCheckBox(tr("Limiter (prevent clipping)"));
+		rowNorm->addWidget(chk_limiter_);
+		rowNorm->addStretch(1);
+		proc->addLayout(rowNorm);
 
-	table_sources_ = new QTableWidget();
-	table_sources_->setColumnCount(3);
-	table_sources_->setHorizontalHeaderLabels({tr("Record"), tr("Source"), tr("Alias (optional)" )});
-	table_sources_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-	table_sources_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-	table_sources_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
-	table_sources_->verticalHeader()->setVisible(false);
-	table_sources_->setSelectionMode(QAbstractItemView::NoSelection);
-	table_sources_->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
-	src->addWidget(table_sources_, 1);
+		chk_sidecar_ = new QCheckBox(tr("Write session.json sidecar"));
+		chk_scene_markers_ = new QCheckBox(tr("Record scene change markers"));
+		proc->addWidget(chk_sidecar_);
+		proc->addWidget(chk_scene_markers_);
+		proc->addStretch(1);
 
-	root->addWidget(gbSources, 1);
+		toolbox->addItem(page, tr("Processing"));
+	}
+
+	// Default open: Sources (usually the first thing users want)
+	toolbox->setCurrentIndex(2);
 
 	// Buttons
 	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
