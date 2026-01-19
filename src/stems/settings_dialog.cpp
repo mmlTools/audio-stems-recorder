@@ -78,7 +78,7 @@ namespace stems
 		nav_list_->setUniformItemSizes(true);
 		nav_list_->addItem(tr("General"));
 		nav_list_->addItem(tr("Audio Sources"));
-		nav_list_->addItem(tr("Processing"));
+		nav_list_->addItem(tr("Settings"));
 		navLay->addWidget(nav_list_, 1);
 
 		contentRow->addWidget(navWrap);
@@ -449,152 +449,11 @@ namespace stems
 	void SettingsDialog::apply_dialog_style_()
 	{
 		setStyleSheet(R"QSS(
-QDialog {
-	background: #1b1d21;
-	color: #e8e8e8;
-}
-
-#navWrap {
-	background: #23262b;
-	border: 1px solid rgba(255,255,255,0.08);
-	border-radius: 6px;
-}
-
-#panelStack {
-	background: #1f2126;
-	border: 1px solid rgba(255,255,255,0.08);
-	border-radius: 6px;
-}
-
-#navList {
-	background: transparent;
-	border: none;
-	padding: 6px;
-	outline: none;
-}
-#navList::item {
-	padding: 5px 5px;
-	margin: 4px 4px;
-	border-radius: 6px;
-	color: rgba(255,255,255,0.88);
-}
-#navList::item:hover {
-	background: rgba(255,255,255,0.06);
-}
-#navList::item:selected {
-	background: rgba(90,140,255,0.22);
-	color: #ffffff;
-}
-
-QGroupBox {
-	border: 1px solid rgba(255,255,255,0.08);
-	border-radius: 3px;
-	margin-top: 10px;
-}
-QGroupBox::title {
-	subcontrol-origin: margin;
-	left: 10px;
-	padding: 0 6px;
-	color: rgba(255,255,255,0.86);
-	font-weight: 600;
-}
-
-QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
-	background: rgba(255,255,255,0.06);
-	border: 1px solid rgba(255,255,255,0.10);
-	border-radius: 3px;
-	padding: 7px 10px;
-	min-height: 30px;
-	color: #ffffff;
-	selection-background-color: rgba(90,140,255,0.35);
-}
-QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
-	border-color: rgba(90,140,255,0.65);
-	background: rgba(255,255,255,0.08);
-}
-
-QPushButton {
-	border-radius: 3px;
-	padding: 8px 14px;
-	border: 1px solid rgba(255,255,255,0.14);
-	background: rgba(255,255,255,0.09);
-	color: #ffffff;
-}
-QPushButton:hover {
-	background: rgba(255,255,255,0.13);
-	border-color: rgba(255,255,255,0.20);
-}
-QPushButton:pressed {
-	background: rgba(255,255,255,0.07);
-}
-
-QPushButton#primaryBtn {
-	background: rgba(90, 140, 255, 0.90);
-	border-color: rgba(90, 140, 255, 0.95);
-	color: #0b1020;
-	font-weight: 700;
-}
-QPushButton#primaryBtn:hover {
-	background: rgba(90, 140, 255, 0.98);
-}
-QPushButton#primaryBtn:pressed {
-	background: rgba(90, 140, 255, 0.80);
-}
-
-QPushButton#secondaryBtn {
-	background: rgba(255,255,255,0.10);
-	border-color: rgba(255,255,255,0.18);
-	font-weight: 600;
-}
-QPushButton#secondaryBtn:hover {
-	background: rgba(255,255,255,0.15);
-	border-color: rgba(255,255,255,0.22);
-}
-
-QCheckBox { spacing: 8px; }
-QCheckBox::indicator {
-	width: 16px;
-	height: 16px;
-	border-radius: 3px;
-	border: 1px solid rgba(255,255,255,0.20);
-	background: rgba(255,255,255,0.06);
-}
-QCheckBox::indicator:checked {
-	background: rgba(90, 140, 255, 0.90);
-	border-color: rgba(90, 140, 255, 0.95);
-}
-
-QTableWidget#sourcesTable {
-	background: rgba(255,255,255,0.03);
-	border: 1px solid rgba(255,255,255,0.08);
-	border-radius: 3px;
-	gridline-color: rgba(255,255,255,0.06);
-	alternate-background-color: rgba(255,255,255,0.04);
-	color: #ffffff;
-}
-QHeaderView::section {
-	background: rgba(255,255,255,0.07);
-	border: none;
-	border-bottom: 1px solid rgba(255,255,255,0.10);
-	padding: 8px 10px;
-	font-weight: 700;
-	color: rgba(255,255,255,0.92);
-}
-QTableWidget::item {
-	padding: 8px 10px;
-	color: rgba(255,255,255,0.92);
-}
-QTableWidget QLineEdit {
-	background: rgba(0,0,0,0.20);
-	border: 1px solid rgba(90,140,255,0.55);
-	border-radius: 3px;
-	color: #ffffff;
-}
-
-QDialogButtonBox QPushButton {
-	min-width: 94px;
-}
-)QSS");
+			#navList::item {
+				padding: 5px 5px;
+				margin: 4px 2px;
+			}
+		)QSS");
 	}
 
 } // namespace stems
