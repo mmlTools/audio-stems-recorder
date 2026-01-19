@@ -4,10 +4,7 @@
 
 #include <obs-module.h>
 #include <obs-frontend-api.h>
-
-// os_gettime_ns
 #include <util/platform.h>
-
 #include <ctime>
 #include <filesystem>
 #include <string>
@@ -64,7 +61,7 @@ static void enumerate_audio_sources(std::vector<obs_source_t *> &out_sources)
 			uint32_t flags = obs_source_get_output_flags(src);
 			if ((flags & OBS_SOURCE_AUDIO) == 0)
 				return true;
-			// Acquire a strong reference for the caller.
+
 			obs_source_t *ref = obs_source_get_ref(src);
 			if (ref)
 				vec->push_back(ref);
@@ -132,7 +129,6 @@ bool Session::start()
 	session_dir_ = session_dir.string();
 	mark_inprogress(true);
 
-	// Record start marker and initial scene
 	markers_.push_back(Marker{0, "session_start", mode});
 	if (settings_.record_scene_markers) {
 		obs_source_t *scene = obs_frontend_get_current_scene();
@@ -167,7 +163,6 @@ bool Session::start()
 
 		const char *name = obs_source_get_name(src);
 		std::string fname = sanitize_filename(name ? name : "source");
-		// Apply alias naming if enabled
 		if (settings_.use_source_aliases) {
 			for (const auto &p : settings_.source_aliases) {
 				if (p.first == (uuid ? uuid : "") && !p.second.empty()) {
@@ -225,7 +220,6 @@ void Session::stop()
 	for (auto &o : finished) {
 		if (o.recorder)
 			o.recorder->stop();
-		// Keep recorder metadata while it exists
 		if (o.source_uuid.empty())
 			o.source_uuid = o.recorder ? o.recorder->source_uuid() : "";
 		if (o.source_name.empty())

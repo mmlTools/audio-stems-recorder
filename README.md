@@ -2,7 +2,7 @@
 
 **Record every sound in your stream as its own professional audio layer.**
 
-Audio Stems Recorder is an OBS Studio plugin that automatically captures each selected audio source into a separate, high‑quality WAV file whenever you start or stop **Recording** or **Streaming**. Instead of a single mixed track, you get clean, perfectly synced stems—ready for professional editing, shorts, highlights, podcasts, and post‑production.
+Audio Stems Recorder is an OBS Studio plugin that automatically captures each selected audio source into a separate, high quality WAV file whenever you start or stop **Recording** or **Streaming**. Instead of a single mixed track, you get clean, perfectly synced stems ready for professional editing, shorts, highlights, podcasts, and post‑production.
 
 ---
 
@@ -93,6 +93,6 @@ You no longer edit a flat audio mix.
 
 You edit **real stems**.
 
-Voice, game, music, and chat—each on its own timeline, perfectly synced, clean, and ready for professional‑grade production.
+Voice, game, music, and chat each on its own timeline, perfectly synced, clean, and ready for professional‑grade production.
 
 This plugin turns OBS Studio into a true multi‑track audio recorder, bringing broadcast‑level workflows to streamers and creators.

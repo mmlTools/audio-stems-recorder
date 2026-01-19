@@ -64,35 +64,28 @@ Settings load_settings()
 		return s;
 	const QJsonObject root = doc.object();
 
-	// Simple fields
 	s.trigger_recording = root.value("trigger_recording").toBool(true);
 	s.trigger_streaming = root.value("trigger_streaming").toBool(true);
 	const QString out = root.value("output_dir").toString().trimmed();
 	if (!out.isEmpty())
 		s.output_dir = out.toStdString();
 
-	// Post-processing
 	s.trim_silence = root.value("trim_silence").toBool(true);
 	s.trim_threshold_dbfs = (float)root.value("trim_threshold_dbfs").toDouble(-45.0);
 	s.trim_lead_ms = root.value("trim_lead_ms").toInt(150);
 	s.trim_trail_ms = root.value("trim_trail_ms").toInt(350);
-
 	s.normalize_audio = root.value("normalize_audio").toBool(true);
 	s.normalize_target_dbfs = (float)root.value("normalize_target_dbfs").toDouble(-16.0);
 	s.normalize_limiter = root.value("normalize_limiter").toBool(true);
-
-	// Metadata
 	s.write_sidecar_json = root.value("write_sidecar_json").toBool(true);
 	s.record_scene_markers = root.value("record_scene_markers").toBool(true);
-
-	// Naming
 	s.use_source_aliases = root.value("use_source_aliases").toBool(false);
 
-	// Arrays
 	const QJsonArray uuids = root.value("selected_source_uuids").toArray();
 	s.selected_source_uuids.clear();
 	s.selected_source_uuids.reserve(uuids.size());
-	for (const auto &v : uuids) {
+	for (const auto v : uuids)
+	{
 		const QString u = v.toString().trimmed();
 		if (!u.isEmpty())
 			s.selected_source_uuids.emplace_back(u.toStdString());
@@ -101,7 +94,8 @@ Settings load_settings()
 	const QJsonArray aliases = root.value("source_aliases").toArray();
 	s.source_aliases.clear();
 	s.source_aliases.reserve(aliases.size());
-	for (const auto &v : aliases) {
+	for (const auto v : aliases)
+	{
 		if (!v.isObject())
 			continue;
 		const QJsonObject o = v.toObject();
