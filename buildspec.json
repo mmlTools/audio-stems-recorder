@@ -33,13 +33,13 @@
   },
   "platformConfig": {
     "macos": {
-      "bundleId": "com.obscountdown.audio-stems-recorder"
+      "bundleId": "com.streamrsc.audio-stems-recorder"
     }
   },
   "name": "audio-stems-recorder",
   "displayName": "Audio Stems Recorder",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": "MML Tech",
-  "website": "https://obscountdown.com",
-  "email": "contact@obscountdown.com"
+  "website": "https://streamrsc.com",
+  "email": "contact@streamrsc.com"
 }
