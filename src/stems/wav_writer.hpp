@@ -22,7 +22,7 @@ public:
 	uint16_t channels() const { return channels_; }
 	uint64_t frames_written() const { return frames_written_; }
 
-	// Repair header sizes for a WAV file produced by this writer, based on file length.
+	
 	static bool repair_header(const std::string &path);
 
 private:
@@ -36,4 +36,4 @@ private:
 	uint64_t frames_written_ = 0;
 };
 
-} // namespace stems
+} 

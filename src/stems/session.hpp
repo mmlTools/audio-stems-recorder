@@ -1,11 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
-#include <cstdint>
 #include <vector>
-
-#include <obs-module.h>
 
 #include "settings.hpp"
 #include "stem_recorder.hpp"
@@ -17,11 +15,19 @@ enum class SessionKind {
 	Streaming,
 };
 
+struct SourceAudioProperties {
+	uint32_t sample_rate = 0;
+	uint16_t channels = 0;
+	int bitrate_kbps = 0;
+};
+
 struct StemOutput {
 	std::unique_ptr<StemRecorder> recorder;
 	std::string wav_path;
+	std::string final_path;
 	std::string source_uuid;
 	std::string source_name;
+	SourceAudioProperties audio_properties;
 };
 
 class Session {
@@ -39,7 +45,7 @@ public:
 
 private:
 	void write_sidecar_json(const std::vector<StemOutput> &finished) const;
-	void postprocess_stems(const std::vector<StemOutput> &finished);
+	void postprocess_stems(std::vector<StemOutput> &finished);
 	void mark_inprogress(bool inprogress);
 	SessionKind kind_;
 	Settings settings_;
@@ -58,4 +64,4 @@ private:
 	bool running_ = false;
 };
 
-} // namespace stems
+} 

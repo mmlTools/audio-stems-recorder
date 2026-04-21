@@ -44,15 +44,16 @@ if(ENABLE_QT)
   )
 endif()
 
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-  src/plugin-main.cpp
-  src/stems/settings.cpp
-  src/stems/wav_writer.cpp
-  src/stems/wav_postprocess.cpp
-  src/stems/stem_recorder.cpp
-  src/stems/session.cpp
-  src/stems/settings_dialog.cpp
-  src/stems/stem_plugin.cpp
+target_sources(audio-stems-recorder PRIVATE
+    src/plugin-main.cpp
+    src/stems/session.cpp
+    src/stems/settings.cpp
+    src/stems/settings_dialog.cpp
+    src/stems/stem_plugin.cpp
+    src/stems/stem_recorder.cpp
+    src/stems/transcode.cpp
+    src/stems/wav_postprocess.cpp
+    src/stems/wav_writer.cpp
 )
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

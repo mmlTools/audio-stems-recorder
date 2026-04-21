@@ -28,7 +28,7 @@ static void repair_inprogress_sessions(const Settings &settings)
 		fs::path marker = entry.path() / ".inprogress";
 		if (!fs::exists(marker, ec))
 			continue;
-		// Repair all wav files in this folder and remove marker.
+		
 		for (auto &f : fs::directory_iterator(entry.path(), ec)) {
 			if (ec)
 				break;
@@ -65,7 +65,7 @@ void StemPlugin::startup()
 void StemPlugin::shutdown()
 {
 	std::lock_guard<std::mutex> lock(mtx_);
-	// Stop sessions if active
+	
 	if (rec_session_) {
 		rec_session_->stop();
 		rec_session_.reset();
@@ -74,7 +74,7 @@ void StemPlugin::shutdown()
 		stream_session_->stop();
 		stream_session_.reset();
 	}
-	// OBS does not provide a public API to remove the tools menu item; keeping the callback registered is ok.
+	
 }
 
 void StemPlugin::frontend_event_cb(enum obs_frontend_event event, void *param)
@@ -98,7 +98,7 @@ void StemPlugin::on_frontend_event(enum obs_frontend_event event)
 	switch (event) {
 	case OBS_FRONTEND_EVENT_RECORDING_STARTED:
 		if (settings_.trigger_recording) {
-			// Always start a fresh session folder per start event
+			
 			if (rec_session_) {
 				rec_session_->stop();
 				rec_session_.reset();
@@ -113,7 +113,7 @@ void StemPlugin::on_frontend_event(enum obs_frontend_event event)
 		break;
 	case OBS_FRONTEND_EVENT_STREAMING_STARTED:
 		if (settings_.trigger_streaming) {
-			// Always start a fresh session folder per start event
+			
 			if (stream_session_) {
 				stream_session_->stop();
 				stream_session_.reset();
@@ -153,13 +153,13 @@ void StemPlugin::on_frontend_event(enum obs_frontend_event event)
 
 static QWidget *obs_main_window_qt()
 {
-	// Frontend API provides the main window as a QWidget pointer on Qt builds.
+	
 	return reinterpret_cast<QWidget *>(obs_frontend_get_main_window());
 }
 
 void StemPlugin::open_settings_dialog()
 {
-	// UI must run on the Qt main thread; obs_frontend_get_main_window() is only valid when Qt is available.
+	
 	QWidget *parent = obs_main_window_qt();
 	SettingsDialog dlg(parent);
 	dlg.set_settings(settings_);
@@ -170,4 +170,4 @@ void StemPlugin::open_settings_dialog()
 	}
 }
 
-} // namespace stems
+} 

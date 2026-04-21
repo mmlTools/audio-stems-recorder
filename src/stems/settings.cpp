@@ -70,6 +70,11 @@ Settings load_settings()
 	if (!out.isEmpty())
 		s.output_dir = out.toStdString();
 
+	const QString output_format = root.value("output_format").toString("wav").trimmed().toLower();
+	s.output_format = (output_format == "mp3") ? "mp3" : "wav";
+	const int wav_bit_depth = root.value("wav_bit_depth").toInt(16);
+	s.wav_bit_depth = (wav_bit_depth == 24 || wav_bit_depth == 32) ? wav_bit_depth : 16;
+
 	s.trim_silence = root.value("trim_silence").toBool(true);
 	s.trim_threshold_dbfs = (float)root.value("trim_threshold_dbfs").toDouble(-45.0);
 	s.trim_lead_ms = root.value("trim_lead_ms").toInt(150);
@@ -105,7 +110,7 @@ Settings load_settings()
 			s.source_aliases.emplace_back(uuid.toStdString(), alias.toStdString());
 	}
 
-	// sanitize
+	
 	s.selected_source_uuids.erase(
 		std::remove_if(s.selected_source_uuids.begin(), s.selected_source_uuids.end(),
 				[](const std::string &x) { return x.empty(); }),
@@ -124,6 +129,8 @@ void save_settings(const Settings &s)
 	root["trigger_recording"] = s.trigger_recording;
 	root["trigger_streaming"] = s.trigger_streaming;
 	root["output_dir"] = QString::fromStdString(s.output_dir);
+	root["output_format"] = QString::fromStdString(s.output_format == "mp3" ? "mp3" : "wav");
+	root["wav_bit_depth"] = (s.wav_bit_depth == 24 || s.wav_bit_depth == 32) ? s.wav_bit_depth : 16;
 
 	root["trim_silence"] = s.trim_silence;
 	root["trim_threshold_dbfs"] = s.trim_threshold_dbfs;
@@ -160,4 +167,4 @@ void save_settings(const Settings &s)
 	write_text_file(path, doc.toJson(QJsonDocument::Compact).toStdString());
 }
 
-} // namespace stems
+} 

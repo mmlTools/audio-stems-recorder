@@ -1,11 +1,4 @@
-/*
-  Audio Stems Recorder
 
-  Records selected OBS audio sources individually when Recording/Streaming starts,
-  writing per-source WAV stems and converting them to MP3 on stop.
-
-  This is implemented as a frontend plugin (Tools menu).
-*/
 
 #include <obs-module.h>
 

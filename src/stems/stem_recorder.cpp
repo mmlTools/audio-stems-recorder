@@ -92,7 +92,7 @@ void StemRecorder::on_audio(const struct audio_data *audio, bool muted)
 	if (frames == 0)
 		return;
 
-	// OBS typically provides float planar. We interleave to int16.
+	
 	PcmChunk chunk;
 	chunk.frames = frames;
 	chunk.samples.resize((size_t)frames * (size_t)channels_);
@@ -108,8 +108,8 @@ void StemRecorder::on_audio(const struct audio_data *audio, bool muted)
 		}
 	}
 
-	// Keep queue bounded to avoid unbounded memory usage.
-	// If worker falls behind, drop oldest chunks.
+	
+	
 	{
 		std::lock_guard<std::mutex> lock(mtx_);
 		if (queue_.size() >= 128) {
@@ -142,11 +142,11 @@ void StemRecorder::worker_main()
 		}
 
 	if (!wav_.write_samples(chunk.samples.data(), chunk.frames)) {
-		// If IO fails, stop capturing for this stem.
+		
 		blog(LOG_ERROR, "Audio Stems: failed writing WAV for %s", source_name_.c_str());
 		break;
 	}
 	}
 }
 
-} // namespace stems
+} 

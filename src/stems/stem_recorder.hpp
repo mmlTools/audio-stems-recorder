@@ -15,7 +15,7 @@
 namespace stems {
 
 struct PcmChunk {
-	std::vector<int16_t> samples; // interleaved int16
+	std::vector<int16_t> samples; 
 	uint32_t frames = 0;
 };
 
@@ -38,7 +38,7 @@ private:
 	void on_audio(const struct audio_data *audio, bool muted);
 	void worker_main();
 
-	obs_source_t *source_ = nullptr; // weak
+	obs_source_t *source_ = nullptr; 
 	std::string source_uuid_;
 	std::string source_name_;
 
@@ -56,4 +56,4 @@ private:
 	std::atomic<uint64_t> dropped_chunks_{0};
 };
 
-} // namespace stems
+} 

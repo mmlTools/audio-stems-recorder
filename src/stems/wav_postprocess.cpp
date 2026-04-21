@@ -26,7 +26,7 @@ static bool read_pcm16_data(const std::string &path, std::vector<int16_t> &out, 
 	std::FILE *f = std::fopen(path.c_str(), "rb");
 	if (!f)
 		return false;
-	// Minimal WAV: we expect 44-byte header written by WavWriter
+	
 	if (std::fseek(f, 0, SEEK_END) != 0) {
 		std::fclose(f);
 		return false;
@@ -70,7 +70,7 @@ static bool write_pcm16_data(const std::string &path, const std::vector<int16_t>
 		return false;
 	const size_t frames = channels ? (samples.size() / channels) : 0;
 	if (frames > 0) {
-		// WavWriter expects frames and interleaved samples
+		
 		if (!w.write_samples(samples.data(), frames)) {
 			w.close();
 			return false;
@@ -125,7 +125,7 @@ bool trim_silence_wav(const std::string &wav_path, uint16_t channels, uint32_t s
 	while (first < total_frames && !frame_is_audible(first))
 		first++;
 	if (first >= total_frames) {
-		// All silence: keep as-is
+		
 		return true;
 	}
 
@@ -178,7 +178,7 @@ bool normalize_wav_rms(const std::string &wav_path, uint16_t channels, uint32_t 
 	if (s.empty())
 		return true;
 
-	// RMS over all samples
+	
 	long double sum_sq = 0.0L;
 	int32_t peak = 0;
 	for (int16_t v : s) {
@@ -205,7 +205,7 @@ bool normalize_wav_rms(const std::string &wav_path, uint16_t channels, uint32_t 
 	if (gain <= 0.0L)
 		return true;
 
-	// Apply gain
+	
 	std::vector<int16_t> out;
 	out.resize(s.size());
 	for (size_t i = 0; i < s.size(); i++) {
@@ -229,4 +229,4 @@ bool normalize_wav_rms(const std::string &wav_path, uint16_t channels, uint32_t 
 	return true;
 }
 
-} // namespace stems
+} 

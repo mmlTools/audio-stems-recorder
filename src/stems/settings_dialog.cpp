@@ -18,6 +18,7 @@
 #include <QAbstractItemView>
 #include <QFrame>
 #include <QWidget>
+#include <QComboBox>
 
 #include <obs-module.h>
 
@@ -140,6 +141,30 @@ namespace stems
 				rowDir->addWidget(btnBrowseDir);
 
 				g->addLayout(rowDir);
+
+				auto *rowFormat = new QHBoxLayout();
+				rowFormat->setSpacing(8);
+				rowFormat->addWidget(new QLabel(tr("File format")));
+				combo_output_format_ = new QComboBox();
+				combo_output_format_->addItem(tr("WAV"), QStringLiteral("wav"));
+				combo_output_format_->addItem(tr("MP3"), QStringLiteral("mp3"));
+				rowFormat->addWidget(combo_output_format_);
+
+				rowFormat->addWidget(new QLabel(tr("WAV bit depth")));
+				combo_wav_bit_depth_ = new QComboBox();
+				combo_wav_bit_depth_->addItem(QStringLiteral("16-bit"), 16);
+				combo_wav_bit_depth_->addItem(QStringLiteral("24-bit"), 24);
+				combo_wav_bit_depth_->addItem(QStringLiteral("32-bit"), 32);
+				rowFormat->addWidget(combo_wav_bit_depth_);
+				rowFormat->addStretch(1);
+				g->addLayout(rowFormat);
+
+				connect(combo_output_format_, qOverload<int>(&QComboBox::currentIndexChanged), this,
+					[this](int) {
+						const bool is_wav = combo_output_format_->currentData().toString() == QStringLiteral("wav");
+						combo_wav_bit_depth_->setEnabled(is_wav);
+					});
+
 				lay->addWidget(group);
 			}
 
@@ -332,6 +357,16 @@ namespace stems
 		chk_recording_->setChecked(settings_.trigger_recording);
 		chk_streaming_->setChecked(settings_.trigger_streaming);
 		edit_output_->setText(QString::fromUtf8(settings_.output_dir.c_str()));
+		const QString outputFormat = QString::fromStdString(settings_.output_format == "mp3" ? "mp3" : "wav");
+		int formatIndex = combo_output_format_->findData(outputFormat);
+		if (formatIndex < 0)
+			formatIndex = 0;
+		combo_output_format_->setCurrentIndex(formatIndex);
+		int bitDepthIndex = combo_wav_bit_depth_->findData(settings_.wav_bit_depth);
+		if (bitDepthIndex < 0)
+			bitDepthIndex = combo_wav_bit_depth_->findData(16);
+		combo_wav_bit_depth_->setCurrentIndex(bitDepthIndex);
+		combo_wav_bit_depth_->setEnabled(outputFormat == QStringLiteral("wav"));
 		chk_trim_->setChecked(settings_.trim_silence);
 		spin_trim_thr_->setValue(settings_.trim_threshold_dbfs);
 		spin_lead_ms_->setValue(settings_.trim_lead_ms);
@@ -383,6 +418,8 @@ namespace stems
 		s.trigger_recording = chk_recording_->isChecked();
 		s.trigger_streaming = chk_streaming_->isChecked();
 		s.output_dir = edit_output_->text().toUtf8().constData();
+		s.output_format = combo_output_format_->currentData().toString().toUtf8().constData();
+		s.wav_bit_depth = combo_wav_bit_depth_->currentData().toInt();
 		s.trim_silence = chk_trim_->isChecked();
 		s.trim_threshold_dbfs = (float)spin_trim_thr_->value();
 		s.trim_lead_ms = spin_lead_ms_->value();
@@ -456,4 +493,4 @@ namespace stems
 		)QSS");
 	}
 
-} // namespace stems
+} 

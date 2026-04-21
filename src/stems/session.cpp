@@ -1,11 +1,13 @@
 #include "session.hpp"
 
+#include "transcode.hpp"
 #include "wav_postprocess.hpp"
 
 #include <obs-module.h>
 #include <obs-frontend-api.h>
 #include <util/platform.h>
 #include <ctime>
+#include <cstdio>
 #include <filesystem>
 #include <string>
 #include <system_error>
@@ -90,6 +92,100 @@ static uint16_t speaker_channels(enum speaker_layout speakers)
 	default:
 		return 2;
 	}
+}
+
+static uint16_t parse_channels_string(const std::string &value)
+{
+	if (value == "mono" || value == "1")
+		return 1;
+	if (value == "stereo" || value == "2" || value == "2.0")
+		return 2;
+	if (value == "2.1" || value == "3")
+		return 3;
+	if (value == "4.0" || value == "4")
+		return 4;
+	if (value == "4.1" || value == "5")
+		return 5;
+	if (value == "5.1" || value == "6")
+		return 6;
+	if (value == "7.1" || value == "8")
+		return 8;
+	return 0;
+}
+
+static uint32_t read_u32_setting(obs_data_t *settings, const char *key)
+{
+	if (!settings || !key)
+		return 0;
+	long long value = obs_data_get_int(settings, key);
+	return value > 0 ? static_cast<uint32_t>(value) : 0;
+}
+
+static int read_bitrate_setting(obs_data_t *settings, const char *key)
+{
+	if (!settings || !key)
+		return 0;
+	long long value = obs_data_get_int(settings, key);
+	return value > 0 ? static_cast<int>(value) : 0;
+}
+
+static uint16_t read_channels_setting(obs_data_t *settings, const char *key)
+{
+	if (!settings || !key)
+		return 0;
+	const char *str = obs_data_get_string(settings, key);
+	if (str && *str) {
+		uint16_t parsed = parse_channels_string(str);
+		if (parsed != 0)
+			return parsed;
+	}
+	long long value = obs_data_get_int(settings, key);
+	return value > 0 ? static_cast<uint16_t>(value) : 0;
+}
+
+static SourceAudioProperties detect_source_audio_properties(obs_source_t *source, uint32_t fallback_sample_rate,
+							    uint16_t fallback_channels)
+{
+	SourceAudioProperties props{};
+	props.sample_rate = fallback_sample_rate;
+	props.channels = fallback_channels;
+	props.bitrate_kbps = 192;
+	if (!source)
+		return props;
+
+	obs_data_t *settings = obs_source_get_settings(source);
+	if (!settings)
+		return props;
+
+	static const char *sample_rate_keys[] = {"sample_rate", "audio_sample_rate", "sampleRate", "samplerate"};
+	for (const char *key : sample_rate_keys) {
+		uint32_t value = read_u32_setting(settings, key);
+		if (value != 0) {
+			props.sample_rate = value;
+			break;
+		}
+	}
+
+	static const char *channel_keys[] = {"channels", "audio_channels", "channel_count", "audioChannel"};
+	for (const char *key : channel_keys) {
+		uint16_t value = read_channels_setting(settings, key);
+		if (value != 0) {
+			props.channels = value;
+			break;
+		}
+	}
+
+	static const char *bitrate_keys[] = {"bitrate", "audio_bitrate", "bitrate_kbps", "audioBitrate"};
+	for (const char *key : bitrate_keys) {
+		int value = read_bitrate_setting(settings, key);
+		if (value != 0) {
+			props.bitrate_kbps = value;
+			break;
+		}
+	}
+
+	obs_data_release(settings);
+	return props;
 }
 
 Session::Session(SessionKind kind, const Settings &settings) : kind_(kind), settings_(settings) {}
@@ -183,8 +279,10 @@ bool Session::start()
 		StemOutput o;
 		o.recorder = std::move(rec);
 		o.wav_path = wavp.string();
+		o.final_path = wavp.string();
 		o.source_uuid = uuid ? uuid : "";
 		o.source_name = name ? name : "";
+		o.audio_properties = detect_source_audio_properties(src, sample_rate_, channels_);
 		stems_.push_back(std::move(o));
 		any = true;
 
@@ -207,7 +305,6 @@ void Session::stop()
 	if (!running_ && stems_.empty())
 		return;
 
-	// marker
 	uint64_t off = 0;
 	if (start_ns_ != 0) {
 		uint64_t now = os_gettime_ns();
@@ -259,9 +356,9 @@ void Session::mark_inprogress(bool inprogress)
 	}
 }
 
-void Session::postprocess_stems(const std::vector<StemOutput> &finished)
+void Session::postprocess_stems(std::vector<StemOutput> &finished)
 {
-	for (const auto &o : finished) {
+	for (auto &o : finished) {
 		if (o.wav_path.empty())
 			continue;
 		if (settings_.trim_silence)
@@ -270,6 +367,44 @@ void Session::postprocess_stems(const std::vector<StemOutput> &finished)
 		if (settings_.normalize_audio)
 			normalize_wav_rms(o.wav_path, channels_, sample_rate_, settings_.normalize_target_dbfs,
 					 settings_.normalize_limiter);
+
+		OutputFormat output_format = settings_.output_format == "mp3" ? OutputFormat::Mp3 : OutputFormat::Wav;
+		const bool needs_export = output_format == OutputFormat::Mp3 ||
+			(o.audio_properties.sample_rate != sample_rate_) ||
+			(o.audio_properties.channels != channels_) ||
+			(settings_.wav_bit_depth != 16);
+		if (!needs_export) {
+			o.final_path = o.wav_path;
+			continue;
+		}
+
+		fs::path desired_path = fs::path(o.wav_path).replace_extension(output_format == OutputFormat::Mp3 ? ".mp3" : ".wav");
+		fs::path export_path = desired_path;
+		if (output_format == OutputFormat::Wav)
+			export_path = desired_path.parent_path() / (desired_path.stem().string() + ".render.wav");
+
+		if (export_audio("", o.wav_path, export_path.string(), output_format, o.audio_properties.bitrate_kbps,
+				 o.audio_properties.sample_rate, o.audio_properties.channels, settings_.wav_bit_depth)) {
+			if (output_format == OutputFormat::Wav) {
+				std::error_code ec;
+				fs::remove(o.wav_path, ec);
+				ec.clear();
+				fs::rename(export_path, desired_path, ec);
+				if (ec) {
+					blog(LOG_ERROR, "Audio Stems: failed finalizing WAV export: %s", ec.message().c_str());
+					o.final_path = o.wav_path;
+					fs::remove(export_path, ec);
+				} else {
+					o.final_path = desired_path.string();
+				}
+			} else {
+				o.final_path = desired_path.string();
+				std::error_code ec;
+				fs::remove(o.wav_path, ec);
+			}
+		} else {
+			o.final_path = o.wav_path;
+		}
 	}
 }
 
@@ -285,6 +420,8 @@ void Session::write_sidecar_json(const std::vector<StemOutput> &finished) const
 	obs_data_set_int(root, "start_ns", (int64_t)start_ns_);
 
 	obs_data_t *cfg = obs_data_create();
+	obs_data_set_string(cfg, "output_format", settings_.output_format.c_str());
+	obs_data_set_int(cfg, "wav_bit_depth", static_cast<int64_t>(settings_.wav_bit_depth));
 	obs_data_set_bool(cfg, "trim_silence", settings_.trim_silence);
 	obs_data_set_double(cfg, "trim_threshold_dbfs", settings_.trim_threshold_dbfs);
 	obs_data_set_int(cfg, "trim_lead_ms", settings_.trim_lead_ms);
@@ -301,8 +438,12 @@ void Session::write_sidecar_json(const std::vector<StemOutput> &finished) const
 	for (const auto &o : finished) {
 		obs_data_t *it = obs_data_create();
 		obs_data_set_string(it, "wav", o.wav_path.c_str());
+		obs_data_set_string(it, "file", o.final_path.c_str());
 		obs_data_set_string(it, "source_uuid", o.source_uuid.c_str());
 		obs_data_set_string(it, "source_name", o.source_name.c_str());
+		obs_data_set_int(it, "source_sample_rate", static_cast<int64_t>(o.audio_properties.sample_rate));
+		obs_data_set_int(it, "source_channels", static_cast<int64_t>(o.audio_properties.channels));
+		obs_data_set_int(it, "source_bitrate_kbps", static_cast<int64_t>(o.audio_properties.bitrate_kbps));
 		obs_data_array_push_back(stems, it);
 		obs_data_release(it);
 	}
@@ -326,4 +467,4 @@ void Session::write_sidecar_json(const std::vector<StemOutput> &finished) const
 	obs_data_release(root);
 }
 
-} // namespace stems
+}

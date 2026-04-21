@@ -32,4 +32,4 @@ private:
 	bool hooked_ = false;
 };
 
-} // namespace stems
+} 

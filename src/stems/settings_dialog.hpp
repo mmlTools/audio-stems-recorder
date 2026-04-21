@@ -11,6 +11,7 @@ class QDoubleSpinBox;
 class QSpinBox;
 class QListWidget;
 class QStackedWidget;
+class QComboBox;
 
 namespace stems
 {
@@ -49,10 +50,12 @@ namespace stems
 		QCheckBox *chk_scene_markers_ = nullptr;
 		QCheckBox *chk_use_aliases_ = nullptr;
 		QLineEdit *edit_output_ = nullptr;
+		QComboBox *combo_output_format_ = nullptr;
+		QComboBox *combo_wav_bit_depth_ = nullptr;
 		QTableWidget *table_sources_ = nullptr;
 
 		QListWidget *nav_list_ = nullptr;
 		QStackedWidget *stack_ = nullptr;
 	};
 
-} // namespace stems
+} 

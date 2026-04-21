@@ -1,11 +1,17 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 namespace stems {
 
-// Returns true on success. On failure, WAV is left intact.
-bool wav_to_mp3(const std::string &ffmpeg_path_or_empty, const std::string &wav_path,
-			const std::string &mp3_path, int bitrate_kbps);
+enum class OutputFormat {
+	Wav,
+	Mp3,
+};
 
-} // namespace stems
+bool export_audio(const std::string &ffmpeg_path_or_empty, const std::string &input_wav_path,
+			 const std::string &output_path, OutputFormat format, int bitrate_kbps,
+			 uint32_t sample_rate, uint16_t channels, int wav_bit_depth);
+
+}
