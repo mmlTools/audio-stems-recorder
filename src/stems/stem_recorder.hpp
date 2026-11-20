@@ -2,23 +2,36 @@
 
 #include <atomic>
 #include <cstdint>
-#include <deque>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <obs-module.h>
 
-#include "wav_writer.hpp"
+#include "spsc_ring.hpp"
+#include "timeline.hpp"
+#include "wav_io.hpp"
 
 namespace stems {
 
-struct PcmChunk {
-	std::vector<int16_t> samples; 
-	uint32_t frames = 0;
+enum class StemKind {
+	Source, // a single OBS audio source (pre- or post-fader)
+	Track,  // one of OBS' six mixer tracks
 };
 
+struct StemFormat {
+	uint32_t sample_rate = 48000;
+	uint16_t channels = 2;
+	SampleFormat sample_format = SampleFormat::S24;
+	double ring_seconds = 8.0;
+};
+
+// Captures one stem.
+//
+// Threading model:
+//   * start/detach/finish/release: OBS UI thread (owned by Session).
+//   * on_audio(): OBS audio thread. Lock-free, allocation-free, never blocks.
+//   * drain()/refresh(): the session's writer thread.
 class StemRecorder {
 public:
 	StemRecorder() = default;
@@ -26,34 +39,77 @@ public:
 	StemRecorder(const StemRecorder &) = delete;
 	StemRecorder &operator=(const StemRecorder &) = delete;
 
-	bool start(obs_source_t *source, const std::string &wav_path, uint32_t sample_rate, uint16_t channels);
-	void stop();
+	bool start_source(obs_source_t *source, bool post_fader, const std::string &wav_path, const StemFormat &fmt);
+	bool start_track(size_t mix_idx, const std::string &wav_path, const StemFormat &fmt);
 
-	const std::string &wav_path() const { return wav_.path(); }
+	// Stop receiving audio. Idempotent; safe to call more than once.
+	void detach();
+
+	// Writer thread: move queued audio to disk. Returns frames consumed.
+	size_t drain(const Timeline &timeline, int64_t now_frames, size_t max_frames);
+	void refresh_header();
+
+	// After the writer thread has stopped: pad to `total_frames`, close file.
+	bool finish(uint64_t total_frames);
+	// Drops the source reference and signal connections (UI thread).
+	void release();
+
+	StemKind kind() const { return kind_; }
+	size_t track_index() const { return mix_idx_; }
+	const std::string &wav_path() const { return wav_path_; }
 	const std::string &source_uuid() const { return source_uuid_; }
 	const std::string &source_name() const { return source_name_; }
+	uint64_t frames_written() const { return frames_written_.load(std::memory_order_relaxed); }
+	uint64_t dropped_frames() const { return dropped_frames_.load(std::memory_order_relaxed); }
+	uint64_t padded_frames() const { return padded_frames_; }
+	bool write_failed() const { return write_failed_.load(std::memory_order_relaxed); }
+	bool source_removed() const { return source_removed_.load(std::memory_order_relaxed); }
 
 private:
-	static void audio_cb(void *param, obs_source_t *source, const struct audio_data *audio, bool muted);
-	void on_audio(const struct audio_data *audio, bool muted);
-	void worker_main();
+	struct ChunkHdr {
+		uint64_t timestamp = 0;
+		uint32_t frames = 0;
+	};
 
-	obs_source_t *source_ = nullptr; 
+	bool open_common(const std::string &wav_path, const StemFormat &fmt);
+	void push(const struct audio_data *audio, bool silent, float gain);
+	void place_chunk(const ChunkHdr &h, const float *data, const Timeline &timeline, int64_t now_frames);
+	bool write_frames(const float *data, size_t frames);
+	bool write_silence(uint64_t frames);
+
+	static void source_audio_cb(void *param, obs_source_t *source, const struct audio_data *audio, bool muted);
+	static void track_audio_cb(void *param, size_t mix_idx, struct audio_data *audio);
+	static void source_remove_cb(void *param, calldata_t *cd);
+
+	StemKind kind_ = StemKind::Source;
+	obs_source_t *source_ = nullptr; // strong reference held for the session
+	size_t mix_idx_ = 0;
+	audio_t *audio_ = nullptr;
+	bool post_fader_ = false;
+	bool signals_connected_ = false;
+
+	std::mutex attach_mtx_;
+	bool attached_ = false;
+
+	std::string wav_path_;
 	std::string source_uuid_;
 	std::string source_name_;
+	StemFormat fmt_;
 
-	uint32_t sample_rate_ = 48000;
-	uint16_t channels_ = 2;
+	// audio thread -> writer thread
+	std::atomic<bool> accepting_{false};
+	SpscRing<float> samples_;
+	SpscRing<ChunkHdr> headers_;
+	std::atomic<uint64_t> dropped_frames_{0};
+	std::atomic<bool> source_removed_{false};
 
+	// writer thread only
 	WavWriter wav_;
-
-	std::mutex mtx_;
-	std::deque<PcmChunk> queue_;
-	std::atomic<bool> running_{false};
-	std::atomic<bool> stopping_{false};
-	std::thread worker_;
-
-	std::atomic<uint64_t> dropped_chunks_{0};
+	std::vector<float> scratch_;
+	bool timeline_started_ = false;
+	uint64_t padded_frames_ = 0;
+	std::atomic<uint64_t> frames_written_{0};
+	std::atomic<bool> write_failed_{false};
 };
 
-} 
+} // namespace stems

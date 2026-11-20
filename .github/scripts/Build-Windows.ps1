@@ -14,17 +14,31 @@ if ( $DebugPreference -eq 'Continue' ) {
     $InformationPreference = 'Continue'
 }
 
-if ( $env:CI -eq $null ) {
-    throw "Build-Windows.ps1 requires CI environment"
-}
-
 if ( -not [System.Environment]::Is64BitOperatingSystem ) {
     throw "A 64-bit system is required to build the project."
 }
 
 if ( $PSVersionTable.PSVersion -lt '7.2.0' ) {
-    Write-Warning 'The obs-studio PowerShell build script requires PowerShell Core 7. Install or upgrade your PowerShell version: https://aka.ms/pscore6'
+    Write-Warning 'The build script requires PowerShell Core 7. Install or upgrade your PowerShell version: https://aka.ms/pscore6'
     exit 2
+}
+
+# OBS Studio 33 is built with Visual Studio 2026; Visual Studio 2022 produces
+# ABI-compatible binaries and is used as a fallback (e.g. older CI images).
+function Get-VisualStudioGenerator {
+    $VsWhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+    if ( -not (Test-Path $VsWhere) ) { return $null }
+
+    $Versions = & $VsWhere -all -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion
+    $Majors = $Versions | ForEach-Object { [int]($_ -split '\.')[0] } | Sort-Object -Descending -Unique
+
+    foreach ( $Major in $Majors ) {
+        switch ( $Major ) {
+            18 { return 'Visual Studio 18 2026' }
+            17 { return 'Visual Studio 17 2022' }
+        }
+    }
+    return $null
 }
 
 function Build {
@@ -44,23 +58,23 @@ function Build {
         . $Utility.FullName
     }
 
-    $BuildSpecFile = Join-Path $ProjectRoot "buildspec.json"
-    if (-not (Test-Path $BuildSpecFile)) {
-        throw "Buildspec not found at ${BuildSpecFile}"
-    }
-
-    $BuildSpec = Get-Content -Path $BuildSpecFile -Raw | ConvertFrom-Json
+    $BuildSpec = Get-Content -Path (Join-Path $ProjectRoot 'buildspec.json') -Raw | ConvertFrom-Json
     $ProductName = $BuildSpec.name
-    $ProductVersion = $BuildSpec.version
-
-    if (-not $ProductName -or -not $ProductVersion) {
-        throw "buildspec.json must contain 'name' and 'version'."
-    }
 
     Push-Location -Stack BuildTemp
     Ensure-Location $ProjectRoot
 
-    $CmakeArgs = @('--preset', "windows-ci-${Target}")
+    # CI builds treat warnings as errors; local builds use the regular preset.
+    $ConfigurePreset = if ( $env:CI ) { "windows-ci-${Target}" } else { "windows-${Target}" }
+    $BuildPreset = "windows-${Target}"
+
+    $CmakeArgs = @('--preset', $ConfigurePreset)
+    $Generator = Get-VisualStudioGenerator
+    if ( $Generator ) {
+        Write-Host "Using generator: ${Generator}"
+        $CmakeArgs += @('-G', $Generator)
+    }
+
     $CmakeBuildArgs = @('--build')
     $CmakeInstallArgs = @()
 
@@ -71,13 +85,14 @@ function Build {
     }
 
     $CmakeBuildArgs += @(
-        '--preset', "windows-${Target}",
+        '--preset', $BuildPreset,
         '--config', $Configuration,
         '--parallel',
         '--', '/consoleLoggerParameters:Summary', '/noLogo'
     )
 
     $InstallPrefix = "${ProjectRoot}/release/${Configuration}"
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $InstallPrefix
 
     $CmakeInstallArgs += @(
         '--install', "build_${Target}",
@@ -99,7 +114,7 @@ function Build {
     Pop-Location -Stack BuildTemp
 
     Write-Host "Build complete:"
-    Write-Host "  - Installed to: $InstallPrefix"
+    Write-Host "  - Installed to: $InstallPrefix/${ProductName}"
 }
 
 Build

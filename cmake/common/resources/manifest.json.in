@@ -1,0 +1,11 @@
+{
+  "id": "audio-stems-recorder",
+  "name": "audio-stems-recorder",
+  "display_name": "Audio Stems Recorder",
+  "version": "@CMAKE_PROJECT_VERSION@",
+  "description": "Records every selected audio source and mixer track to its own sample-aligned file while you record or stream.",
+  "long_description": "Lock-free capture that never blocks OBS audio, RF64 WAV for unlimited length, follows recording pause/resume, scene and hotkey markers, optional FLAC/MP3 export, trim and loudness normalisation in the background.",
+  "urls": {
+    "website": "https://streamrsc.com"
+  }
+}

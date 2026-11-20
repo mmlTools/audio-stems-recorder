@@ -8,6 +8,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSaveFile>
+#include <QStandardPaths>
 
 #include <algorithm>
 #include <string>
@@ -16,34 +18,29 @@ namespace stems {
 
 static const char *k_config_file = "audio-stems-recorder.json";
 
-static std::string module_config_path(const char *filename)
+static QString module_config_path(const char *filename)
 {
 	char *p = obs_module_config_path(filename);
 	if (!p)
 		return {};
-	std::string out = p;
+	QString out = QString::fromUtf8(p);
 	bfree(p);
 	return out;
 }
 
-static bool write_text_file(const std::string &path, const std::string &text)
+std::string default_output_dir()
 {
-	const QFileInfo fi(QString::fromStdString(path));
-	QDir().mkpath(fi.absolutePath());
-
-	QFile f(QString::fromStdString(path));
-	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
-		return false;
-	const QByteArray bytes = QByteArray::fromStdString(text);
-	f.write(bytes);
-	f.close();
-	return true;
+	QString base = QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
+	if (base.isEmpty())
+		base = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+	if (base.isEmpty())
+		return module_config_path(".").toStdString();
+	return QDir::toNativeSeparators(QDir(base).filePath(QStringLiteral("OBS Audio Stems"))).toUtf8().toStdString();
 }
 
-static std::string default_output_dir()
+static int clamp_int(int v, int lo, int hi)
 {
-	std::string p = module_config_path(".");
-	return p.empty() ? std::string{} : p;
+	return std::max(lo, std::min(hi, v));
 }
 
 Settings load_settings()
@@ -51,11 +48,11 @@ Settings load_settings()
 	Settings s;
 	s.output_dir = default_output_dir();
 
-	const std::string path = module_config_path(k_config_file);
-	if (path.empty())
+	const QString path = module_config_path(k_config_file);
+	if (path.isEmpty())
 		return s;
 
-	QFile f(QString::fromStdString(path));
+	QFile f(path);
 	if (!f.exists() || !f.open(QIODevice::ReadOnly))
 		return s;
 
@@ -64,93 +61,110 @@ Settings load_settings()
 		return s;
 	const QJsonObject root = doc.object();
 
-	s.trigger_recording = root.value("trigger_recording").toBool(true);
-	s.trigger_streaming = root.value("trigger_streaming").toBool(true);
+	s.trigger_recording = root.value("trigger_recording").toBool(s.trigger_recording);
+	s.trigger_streaming = root.value("trigger_streaming").toBool(s.trigger_streaming);
+	s.save_next_to_recordings = root.value("save_next_to_recordings").toBool(s.save_next_to_recordings);
 	const QString out = root.value("output_dir").toString().trimmed();
 	if (!out.isEmpty())
-		s.output_dir = out.toStdString();
+		s.output_dir = out.toUtf8().toStdString();
 
-	const QString output_format = root.value("output_format").toString("wav").trimmed().toLower();
-	s.output_format = (output_format == "mp3") ? "mp3" : "wav";
-	const int wav_bit_depth = root.value("wav_bit_depth").toInt(16);
-	s.wav_bit_depth = (wav_bit_depth == 24 || wav_bit_depth == 32) ? wav_bit_depth : 16;
+	const QString fmt = root.value("output_format").toString("wav").trimmed().toLower();
+	s.output_format = (fmt == "mp3" || fmt == "flac") ? fmt.toStdString() : "wav";
+	const int bits = root.value("wav_bit_depth").toInt(s.wav_bit_depth);
+	s.wav_bit_depth = (bits == 16 || bits == 24 || bits == 32) ? bits : 24;
+	s.mp3_bitrate_kbps = clamp_int(root.value("mp3_bitrate_kbps").toInt(s.mp3_bitrate_kbps), 64, 320);
+	s.keep_wav_after_export = root.value("keep_wav_after_export").toBool(s.keep_wav_after_export);
+	s.ffmpeg_path = root.value("ffmpeg_path").toString().trimmed().toUtf8().toStdString();
 
-	s.trim_silence = root.value("trim_silence").toBool(true);
-	s.trim_threshold_dbfs = (float)root.value("trim_threshold_dbfs").toDouble(-45.0);
-	s.trim_lead_ms = root.value("trim_lead_ms").toInt(150);
-	s.trim_trail_ms = root.value("trim_trail_ms").toInt(350);
-	s.normalize_audio = root.value("normalize_audio").toBool(true);
-	s.normalize_target_dbfs = (float)root.value("normalize_target_dbfs").toDouble(-16.0);
-	s.normalize_limiter = root.value("normalize_limiter").toBool(true);
-	s.write_sidecar_json = root.value("write_sidecar_json").toBool(true);
-	s.record_scene_markers = root.value("record_scene_markers").toBool(true);
-	s.use_source_aliases = root.value("use_source_aliases").toBool(false);
+	s.post_fader = root.value("post_fader").toBool(s.post_fader);
+	s.track_mask = (uint32_t)root.value("track_mask").toInt(0) & 0x3Fu;
 
-	const QJsonArray uuids = root.value("selected_source_uuids").toArray();
-	s.selected_source_uuids.clear();
-	s.selected_source_uuids.reserve(uuids.size());
-	for (const auto v : uuids)
-	{
-		const QString u = v.toString().trimmed();
-		if (!u.isEmpty())
-			s.selected_source_uuids.emplace_back(u.toStdString());
+	s.trim_silence = root.value("trim_silence").toBool(s.trim_silence);
+	s.trim_threshold_dbfs = (float)root.value("trim_threshold_dbfs").toDouble(s.trim_threshold_dbfs);
+	s.trim_lead_ms = clamp_int(root.value("trim_lead_ms").toInt(s.trim_lead_ms), 0, 10000);
+	s.trim_trail_ms = clamp_int(root.value("trim_trail_ms").toInt(s.trim_trail_ms), 0, 10000);
+	s.normalize_audio = root.value("normalize_audio").toBool(s.normalize_audio);
+	s.normalize_target_dbfs = (float)root.value("normalize_target_dbfs").toDouble(s.normalize_target_dbfs);
+	s.normalize_limiter = root.value("normalize_limiter").toBool(s.normalize_limiter);
+	s.write_sidecar_json = root.value("write_sidecar_json").toBool(s.write_sidecar_json);
+	s.record_scene_markers = root.value("record_scene_markers").toBool(s.record_scene_markers);
+	s.use_source_aliases = root.value("use_source_aliases").toBool(s.use_source_aliases);
+
+	// Current format: [{uuid, name}]. Older versions stored only UUIDs.
+	const QJsonArray sel = root.value("selected_sources").toArray();
+	for (const auto v : sel) {
+		const QJsonObject o = v.toObject();
+		SelectedSource ss;
+		ss.uuid = o.value("uuid").toString().trimmed().toStdString();
+		ss.name = o.value("name").toString().toUtf8().toStdString();
+		if (!ss.uuid.empty() || !ss.name.empty())
+			s.selected_sources.push_back(std::move(ss));
+	}
+	if (s.selected_sources.empty()) {
+		const QJsonArray uuids = root.value("selected_source_uuids").toArray();
+		for (const auto v : uuids) {
+			const QString u = v.toString().trimmed();
+			if (!u.isEmpty())
+				s.selected_sources.push_back(SelectedSource{u.toStdString(), {}});
+		}
 	}
 
 	const QJsonArray aliases = root.value("source_aliases").toArray();
-	s.source_aliases.clear();
-	s.source_aliases.reserve(aliases.size());
-	for (const auto v : aliases)
-	{
+	for (const auto v : aliases) {
 		if (!v.isObject())
 			continue;
 		const QJsonObject o = v.toObject();
 		const QString uuid = o.value("uuid").toString().trimmed();
 		const QString alias = o.value("alias").toString().trimmed();
 		if (!uuid.isEmpty() && !alias.isEmpty())
-			s.source_aliases.emplace_back(uuid.toStdString(), alias.toStdString());
+			s.source_aliases.emplace_back(uuid.toStdString(), alias.toUtf8().toStdString());
 	}
-
-	
-	s.selected_source_uuids.erase(
-		std::remove_if(s.selected_source_uuids.begin(), s.selected_source_uuids.end(),
-				[](const std::string &x) { return x.empty(); }),
-		s.selected_source_uuids.end());
 
 	return s;
 }
 
 void save_settings(const Settings &s)
 {
-	const std::string path = module_config_path(k_config_file);
-	if (path.empty())
+	const QString path = module_config_path(k_config_file);
+	if (path.isEmpty())
 		return;
 
 	QJsonObject root;
+	root["version"] = 2;
 	root["trigger_recording"] = s.trigger_recording;
 	root["trigger_streaming"] = s.trigger_streaming;
-	root["output_dir"] = QString::fromStdString(s.output_dir);
-	root["output_format"] = QString::fromStdString(s.output_format == "mp3" ? "mp3" : "wav");
-	root["wav_bit_depth"] = (s.wav_bit_depth == 24 || s.wav_bit_depth == 32) ? s.wav_bit_depth : 16;
+	root["save_next_to_recordings"] = s.save_next_to_recordings;
+	root["output_dir"] = QString::fromUtf8(s.output_dir.c_str());
+	root["output_format"] = QString::fromStdString(s.output_format);
+	root["wav_bit_depth"] = s.wav_bit_depth;
+	root["mp3_bitrate_kbps"] = s.mp3_bitrate_kbps;
+	root["keep_wav_after_export"] = s.keep_wav_after_export;
+	root["ffmpeg_path"] = QString::fromUtf8(s.ffmpeg_path.c_str());
+	root["post_fader"] = s.post_fader;
+	root["track_mask"] = (int)s.track_mask;
 
 	root["trim_silence"] = s.trim_silence;
 	root["trim_threshold_dbfs"] = s.trim_threshold_dbfs;
 	root["trim_lead_ms"] = s.trim_lead_ms;
 	root["trim_trail_ms"] = s.trim_trail_ms;
-
 	root["normalize_audio"] = s.normalize_audio;
 	root["normalize_target_dbfs"] = s.normalize_target_dbfs;
 	root["normalize_limiter"] = s.normalize_limiter;
-
 	root["write_sidecar_json"] = s.write_sidecar_json;
 	root["record_scene_markers"] = s.record_scene_markers;
 	root["use_source_aliases"] = s.use_source_aliases;
 
-	QJsonArray uuids;
-	for (const auto &uuid : s.selected_source_uuids) {
-		if (!uuid.empty())
-			uuids.push_back(QString::fromStdString(uuid));
+	QJsonArray sel, uuids;
+	for (const auto &ss : s.selected_sources) {
+		QJsonObject o;
+		o["uuid"] = QString::fromStdString(ss.uuid);
+		o["name"] = QString::fromUtf8(ss.name.c_str());
+		sel.push_back(o);
+		if (!ss.uuid.empty())
+			uuids.push_back(QString::fromStdString(ss.uuid));
 	}
-	root["selected_source_uuids"] = uuids;
+	root["selected_sources"] = sel;
+	root["selected_source_uuids"] = uuids; // keeps older plugin versions working after a downgrade
 
 	QJsonArray aliases;
 	for (const auto &p : s.source_aliases) {
@@ -158,13 +172,19 @@ void save_settings(const Settings &s)
 			continue;
 		QJsonObject o;
 		o["uuid"] = QString::fromStdString(p.first);
-		o["alias"] = QString::fromStdString(p.second);
+		o["alias"] = QString::fromUtf8(p.second.c_str());
 		aliases.push_back(o);
 	}
 	root["source_aliases"] = aliases;
 
-	const QJsonDocument doc(root);
-	write_text_file(path, doc.toJson(QJsonDocument::Compact).toStdString());
+	QDir().mkpath(QFileInfo(path).absolutePath());
+	// Atomic write: a crash while saving never leaves a truncated config.
+	QSaveFile f(path);
+	if (!f.open(QIODevice::WriteOnly))
+		return;
+	f.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+	if (!f.commit())
+		blog(LOG_WARNING, "[Audio Stems] could not save settings to %s", path.toUtf8().constData());
 }
 
-} 
+} // namespace stems

@@ -1,232 +1,222 @@
 #include "wav_postprocess.hpp"
 
-#include "wav_writer.hpp"
+#include "paths.hpp"
+#include "wav_io.hpp"
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <filesystem>
+#include <system_error>
 #include <vector>
 
 namespace stems {
 namespace fs = std::filesystem;
 
-static inline int16_t clamp_s16(int32_t v)
+namespace {
+
+constexpr size_t k_block_frames = 16384;
+constexpr double k_gate_dbfs = -60.0; // ignore near-silence when measuring loudness
+constexpr double k_limiter_ceiling = 0.966; // -0.3 dBFS
+
+inline double to_db(double lin)
 {
-	if (v > 32767)
-		return 32767;
-	if (v < -32768)
-		return -32768;
-	return (int16_t)v;
+	return lin > 1e-9 ? 20.0 * std::log10(lin) : -180.0;
 }
 
-static bool read_pcm16_data(const std::string &path, std::vector<int16_t> &out, uint16_t channels)
-{
-	out.clear();
-	std::FILE *f = std::fopen(path.c_str(), "rb");
-	if (!f)
-		return false;
-	
-	if (std::fseek(f, 0, SEEK_END) != 0) {
-		std::fclose(f);
-		return false;
-	}
-	long sz = std::ftell(f);
-	if (sz < 44) {
-		std::fclose(f);
-		return false;
-	}
-	const long data_bytes = sz - 44;
-	if (data_bytes <= 0) {
-		std::fclose(f);
-		return true;
-	}
-	if (data_bytes % 2 != 0) {
-		std::fclose(f);
-		return false;
-	}
-	const size_t samples = (size_t)(data_bytes / 2);
-	if (samples < channels) {
-		std::fclose(f);
-		return true;
-	}
-	if (std::fseek(f, 44, SEEK_SET) != 0) {
-		std::fclose(f);
-		return false;
-	}
-	out.resize(samples);
-	size_t rd = std::fread(out.data(), sizeof(int16_t), samples, f);
-	std::fclose(f);
-	if (rd != samples)
-		return false;
-	return true;
-}
+struct Analysis {
+	uint64_t frames = 0;
+	bool any_audible = false;
+	uint64_t first_audible = 0;
+	uint64_t last_audible = 0;
+	double peak = 0.0;
+	double gated_rms = 0.0;
+	double plain_rms = 0.0;
+};
 
-static bool write_pcm16_data(const std::string &path, const std::vector<int16_t> &samples,
-			     uint32_t sample_rate, uint16_t channels)
+bool analyze(WavReader &rd, float audible_threshold, const std::atomic<bool> &cancel, Analysis &a)
 {
-	WavWriter w;
-	if (!w.open(path, sample_rate, channels))
-		return false;
-	const size_t frames = channels ? (samples.size() / channels) : 0;
-	if (frames > 0) {
-		
-		if (!w.write_samples(samples.data(), frames)) {
-			w.close();
+	const WavInfo &info = rd.info();
+	const uint16_t ch = info.channels;
+	std::vector<float> buf(k_block_frames * ch);
+
+	// Loudness is measured over 100 ms windows; windows below the gate are
+	// ignored so long silent stretches do not inflate the normalisation gain.
+	const uint64_t win_frames = std::max<uint64_t>(1, info.sample_rate / 10);
+	const double gate_ms = std::pow(10.0, k_gate_dbfs / 10.0);
+	double win_sum = 0.0;
+	uint64_t win_n = 0;
+	long double gated_sum = 0.0L, total_sum = 0.0L;
+	uint64_t gated_n = 0, total_n = 0;
+
+	uint64_t frame = 0;
+	for (;;) {
+		if (cancel.load(std::memory_order_relaxed))
 			return false;
+		const size_t got = rd.read(buf.data(), k_block_frames);
+		if (got == 0)
+			break;
+		for (size_t i = 0; i < got; i++, frame++) {
+			float fpeak = 0.0f;
+			double fsum = 0.0;
+			const float *s = &buf[i * ch];
+			for (uint16_t c = 0; c < ch; c++) {
+				const float v = std::fabs(s[c]);
+				fpeak = v > fpeak ? v : fpeak;
+				fsum += (double)s[c] * (double)s[c];
+			}
+			if (fpeak >= audible_threshold) {
+				if (!a.any_audible)
+					a.first_audible = frame;
+				a.any_audible = true;
+				a.last_audible = frame;
+			}
+			if (fpeak > a.peak)
+				a.peak = fpeak;
+
+			win_sum += fsum;
+			win_n += ch;
+			if (win_n >= win_frames * ch) {
+				if (win_sum / (double)win_n >= gate_ms) {
+					gated_sum += win_sum;
+					gated_n += win_n;
+				}
+				total_sum += win_sum;
+				total_n += win_n;
+				win_sum = 0.0;
+				win_n = 0;
+			}
 		}
 	}
-	w.close();
+	if (win_n > 0) {
+		if (win_sum / (double)win_n >= gate_ms) {
+			gated_sum += win_sum;
+			gated_n += win_n;
+		}
+		total_sum += win_sum;
+		total_n += win_n;
+	}
+	a.frames = frame;
+	a.gated_rms = gated_n ? std::sqrt((double)(gated_sum / (long double)gated_n)) : 0.0;
+	a.plain_rms = total_n ? std::sqrt((double)(total_sum / (long double)total_n)) : 0.0;
 	return true;
 }
 
-static bool swap_in_tmp(const std::string &original, const std::string &tmp)
+} // namespace
+
+bool analyze_wav(const std::string &path, const std::atomic<bool> &cancel, PostprocessResult &result)
 {
+	WavReader rd;
+	if (!rd.open(path))
+		return false;
+	Analysis a;
+	if (!analyze(rd, 1e-4f, cancel, a))
+		return false;
+	result.frames = a.frames;
+	result.silent = !a.any_audible;
+	result.peak_dbfs = to_db(a.peak);
+	result.rms_dbfs = to_db(a.gated_rms > 0.0 ? a.gated_rms : a.plain_rms);
+	return true;
+}
+
+bool postprocess_wav(const std::string &path, const PostprocessOptions &opt, const std::atomic<bool> &cancel,
+		     PostprocessResult &result)
+{
+	result = PostprocessResult{};
+
+	WavReader rd;
+	if (!rd.open(path))
+		return false;
+	const WavInfo info = rd.info();
+	const uint16_t ch = info.channels;
+
+	const float threshold = (float)std::pow(10.0, std::min(-1.0f, opt.trim_threshold_dbfs) / 20.0);
+	Analysis a;
+	if (!analyze(rd, opt.trim ? threshold : 1e-4f, cancel, a))
+		return false;
+
+	result.frames = a.frames;
+	result.peak_dbfs = to_db(a.peak);
+	result.rms_dbfs = to_db(a.gated_rms > 0.0 ? a.gated_rms : a.plain_rms);
+	result.silent = !a.any_audible || a.peak <= 0.0;
+	if (a.frames == 0 || result.silent)
+		return true; // nothing to trim or normalise; leave the (silent) stem untouched
+
+	uint64_t start = 0, end = a.frames;
+	if (opt.trim) {
+		const uint64_t lead = (uint64_t)std::max(0, opt.trim_lead_ms) * info.sample_rate / 1000u;
+		const uint64_t trail = (uint64_t)std::max(0, opt.trim_trail_ms) * info.sample_rate / 1000u;
+		start = a.first_audible > lead ? a.first_audible - lead : 0;
+		end = std::min<uint64_t>(a.frames, a.last_audible + 1 + trail);
+	}
+
+	double gain = 1.0;
+	if (opt.normalize && a.gated_rms > 0.0) {
+		gain = std::pow(10.0, (double)opt.normalize_target_dbfs / 20.0) / a.gated_rms;
+		if (opt.normalize_limiter && a.peak * gain > k_limiter_ceiling)
+			gain = k_limiter_ceiling / a.peak;
+	}
+
+	const bool gain_changes = std::fabs(to_db(gain)) >= 0.01;
+	if (start == 0 && end == a.frames && !gain_changes)
+		return true;
+
+	fs::path tmp = u8path(path);
+	tmp += ".processing.tmp";
+	const std::string tmp_s = to_u8(tmp);
+
+	bool ok = true;
+	{
+		WavWriter w;
+		if (!w.open(tmp_s, info.sample_rate, ch, info.sample_format(), info.channel_mask))
+			return false;
+		if (!rd.seek_frame(start)) {
+			w.close();
+			ok = false;
+		}
+		std::vector<float> buf(k_block_frames * ch);
+		const float g = (float)gain;
+		uint64_t remaining = end - start;
+		while (ok && remaining > 0) {
+			if (cancel.load(std::memory_order_relaxed)) {
+				ok = false;
+				break;
+			}
+			const size_t want = (size_t)std::min<uint64_t>(remaining, k_block_frames);
+			const size_t got = rd.read(buf.data(), want);
+			if (got == 0) {
+				ok = false;
+				break;
+			}
+			if (gain_changes) {
+				for (size_t i = 0; i < got * ch; i++)
+					buf[i] *= g;
+			}
+			if (!w.write(buf.data(), got)) {
+				ok = false;
+				break;
+			}
+			remaining -= got;
+		}
+		ok = w.close() && ok;
+	}
+	rd.close();
+
 	std::error_code ec;
-	fs::remove(original, ec);
-	ec.clear();
-	fs::rename(tmp, original, ec);
-	return !ec;
-}
-
-bool trim_silence_wav(const std::string &wav_path, uint16_t channels, uint32_t sample_rate,
-			      float threshold_dbfs, int lead_ms, int trail_ms)
-{
-	if (channels == 0)
-		channels = 2;
-	if (sample_rate == 0)
-		sample_rate = 48000;
-
-	std::vector<int16_t> s;
-	if (!read_pcm16_data(wav_path, s, channels))
-		return false;
-	if (s.empty())
-		return true;
-
-	const int32_t thr = (int32_t)std::round(std::pow(10.0f, threshold_dbfs / 20.0f) * 32767.0f);
-	const int32_t athr = std::max<int32_t>(1, std::min<int32_t>(32767, std::abs(thr)));
-
-	const size_t total_frames = s.size() / channels;
-	if (total_frames == 0)
-		return true;
-
-	auto frame_is_audible = [&](size_t frame) {
-		for (uint16_t ch = 0; ch < channels; ch++) {
-			int32_t v = s[frame * channels + ch];
-			if (v < 0)
-				v = -v;
-			if (v >= athr)
-				return true;
-		}
-		return false;
-	};
-
-	size_t first = 0;
-	while (first < total_frames && !frame_is_audible(first))
-		first++;
-	if (first >= total_frames) {
-		
-		return true;
-	}
-
-	size_t last = total_frames - 1;
-	while (last > first && !frame_is_audible(last))
-		last--;
-
-	const size_t lead_frames = (size_t)std::max(0, lead_ms) * sample_rate / 1000u;
-	const size_t trail_frames = (size_t)std::max(0, trail_ms) * sample_rate / 1000u;
-
-	size_t start = (first > lead_frames) ? (first - lead_frames) : 0;
-	size_t end = std::min(total_frames, last + 1 + trail_frames);
-	if (start == 0 && end == total_frames)
-		return true;
-
-	std::vector<int16_t> out;
-	out.reserve((end - start) * channels);
-	for (size_t f = start; f < end; f++) {
-		for (uint16_t ch = 0; ch < channels; ch++)
-			out.push_back(s[f * channels + ch]);
-	}
-
-	fs::path p = fs::path(wav_path);
-	fs::path tmp = p;
-	tmp += ".trim.tmp";
-	if (!write_pcm16_data(tmp.string(), out, sample_rate, channels)) {
-		std::error_code ec;
+	if (!ok) {
 		fs::remove(tmp, ec);
 		return false;
 	}
-	if (!swap_in_tmp(wav_path, tmp.string())) {
-		std::error_code ec;
+	fs::rename(tmp, u8path(path), ec);
+	if (ec) {
 		fs::remove(tmp, ec);
 		return false;
 	}
+
+	result.changed = true;
+	result.trimmed_start_frames = start;
+	result.frames = end - start;
+	result.gain_db = gain_changes ? to_db(gain) : 0.0;
 	return true;
 }
 
-bool normalize_wav_rms(const std::string &wav_path, uint16_t channels, uint32_t sample_rate,
-			       float target_dbfs, bool limiter_enabled)
-{
-	if (channels == 0)
-		channels = 2;
-	if (sample_rate == 0)
-		sample_rate = 48000;
-
-	std::vector<int16_t> s;
-	if (!read_pcm16_data(wav_path, s, channels))
-		return false;
-	if (s.empty())
-		return true;
-
-	
-	long double sum_sq = 0.0L;
-	int32_t peak = 0;
-	for (int16_t v : s) {
-		int32_t a = v;
-		if (a < 0)
-			a = -a;
-		if (a > peak)
-			peak = a;
-		long double f = (long double)v / 32768.0L;
-		sum_sq += f * f;
-	}
-	const long double mean_sq = sum_sq / (long double)s.size();
-	const long double rms = std::sqrt(mean_sq);
-	if (rms <= 0.0000001L)
-		return true;
-
-	const long double target_lin = std::pow(10.0L, (long double)target_dbfs / 20.0L);
-	long double gain = target_lin / rms;
-	if (limiter_enabled && peak > 0) {
-		const long double max_gain = (32767.0L / (long double)peak);
-		if (gain > max_gain)
-			gain = max_gain;
-	}
-	if (gain <= 0.0L)
-		return true;
-
-	
-	std::vector<int16_t> out;
-	out.resize(s.size());
-	for (size_t i = 0; i < s.size(); i++) {
-		int32_t v = (int32_t)std::llround((long double)s[i] * gain);
-		out[i] = clamp_s16(v);
-	}
-
-	fs::path p = fs::path(wav_path);
-	fs::path tmp = p;
-	tmp += ".norm.tmp";
-	if (!write_pcm16_data(tmp.string(), out, sample_rate, channels)) {
-		std::error_code ec;
-		fs::remove(tmp, ec);
-		return false;
-	}
-	if (!swap_in_tmp(wav_path, tmp.string())) {
-		std::error_code ec;
-		fs::remove(tmp, ec);
-		return false;
-	}
-	return true;
-}
-
-} 
+} // namespace stems

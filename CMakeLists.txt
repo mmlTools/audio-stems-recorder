@@ -17,43 +17,59 @@ include(helpers)
 
 add_library(${CMAKE_PROJECT_NAME} MODULE)
 
-set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
-  CXX_STANDARD 17
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
+set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 
 find_package(libobs REQUIRED)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs)
 
-if(ENABLE_FRONTEND_API)
-  find_package(obs-frontend-api REQUIRED)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::obs-frontend-api)
+find_package(obs-frontend-api REQUIRED)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::obs-frontend-api)
+
+find_package(Qt6 REQUIRED COMPONENTS Widgets Core)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets)
+target_compile_options(
+  ${CMAKE_PROJECT_NAME}
+  PRIVATE $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-quoted-include-in-framework-header -Wno-comma>
+)
+set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON)
+
+if(WIN32)
+  # Keep <windows.h> from defining min/max macros that clash with std::min/std::max.
+  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
-if(ENABLE_QT)
-  find_package(Qt6 COMPONENTS Widgets Core)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets)
-  target_compile_options(
-    ${CMAKE_PROJECT_NAME}
-    PRIVATE $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-quoted-include-in-framework-header -Wno-comma>
-  )
-  set_target_properties(
-    ${CMAKE_PROJECT_NAME}
-    PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
-  )
-endif()
-
-target_sources(audio-stems-recorder PRIVATE
+target_sources(
+  ${CMAKE_PROJECT_NAME}
+  PRIVATE
     src/plugin-main.cpp
+    src/stems/finalizer.cpp
+    src/stems/finalizer.hpp
+    src/stems/paths.cpp
+    src/stems/paths.hpp
     src/stems/session.cpp
+    src/stems/session.hpp
     src/stems/settings.cpp
+    src/stems/settings.hpp
     src/stems/settings_dialog.cpp
+    src/stems/settings_dialog.hpp
+    src/stems/spsc_ring.hpp
     src/stems/stem_plugin.cpp
+    src/stems/stem_plugin.hpp
     src/stems/stem_recorder.cpp
+    src/stems/stem_recorder.hpp
+    src/stems/stems_dock.cpp
+    src/stems/stems_dock.hpp
+    src/stems/timeline.hpp
     src/stems/transcode.cpp
+    src/stems/transcode.hpp
+    src/stems/wav_io.cpp
+    src/stems/wav_io.hpp
     src/stems/wav_postprocess.cpp
-    src/stems/wav_writer.cpp
+    src/stems/wav_postprocess.hpp
 )
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
+
+# OBS 32+ plugin manager metadata (data/manifest.json), versioned from buildspec.json
+configure_file(cmake/common/resources/manifest.json.in "${CMAKE_CURRENT_BINARY_DIR}/manifest.json" @ONLY)
+target_add_resource(${CMAKE_PROJECT_NAME} "${CMAKE_CURRENT_BINARY_DIR}/manifest.json")

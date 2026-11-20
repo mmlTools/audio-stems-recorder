@@ -110,4 +110,11 @@ runs:
           Configuration = '${{ inputs.config }}'
         }
 
+        if ( '${{ inputs.package }}' -eq 'true' ) {
+          if ( -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe") -and -not (Get-Command iscc.exe -ErrorAction SilentlyContinue) ) {
+            choco install innosetup --no-progress -y
+          }
+          $PackageArgs.Installer = $true
+        }
+
         .github/scripts/Package-Windows.ps1 @PackageArgs
