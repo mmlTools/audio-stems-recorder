@@ -46,7 +46,21 @@ function(_check_deps_version version)
   return(PROPAGATE found CMAKE_PREFIX_PATH)
 endfunction()
 
+# _check_process_result: Abort with the captured output of a failed OBS dependency build step
+#
+# Output is captured rather than shown so successful runs stay quiet, but on failure the real
+# compiler/CMake errors must be printed - otherwise CI only reports "Child return code: 1".
+macro(_check_process_result step)
+  if(NOT _process_result EQUAL 0)
+    message(FATAL_ERROR "${step} failed with exit code ${_process_result}:\n${_process_output}")
+  endif()
+endmacro()
+
 # _setup_obs_studio: Create obs-studio build project, then build libobs and obs-frontend-api
+#
+# The OBS sources are only built to link against, so their warnings must not fail the build:
+# OBS enables CMAKE_COMPILE_WARNING_AS_ERROR by default, and newer compilers on CI images
+# (e.g. MSVC 14.52) emit warnings the pinned OBS release was never built with.
 function(_setup_obs_studio)
   if(NOT libobs_DIR)
     set(_is_fresh --fresh)
@@ -55,7 +69,7 @@ function(_setup_obs_studio)
   if(OS_WINDOWS)
     set(_cmake_generator "${CMAKE_GENERATOR}")
     set(_cmake_arch "-A ${arch},version=${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
-    set(_cmake_extra "-DCMAKE_SYSTEM_VERSION=${CMAKE_SYSTEM_VERSION} -DCMAKE_ENABLE_SCRIPTING=OFF")
+    set(_cmake_extra "-DCMAKE_SYSTEM_VERSION=${CMAKE_SYSTEM_VERSION}" -DENABLE_SCRIPTING:BOOL=OFF)
   elseif(OS_MACOS)
     set(_cmake_generator "Xcode")
     set(_cmake_arch "-DCMAKE_OSX_ARCHITECTURES:STRING='arm64;x86_64'")
@@ -69,11 +83,12 @@ function(_setup_obs_studio)
       "${dependencies_dir}/${_obs_destination}/build_${arch}" -G ${_cmake_generator} "${_cmake_arch}"
       -DOBS_CMAKE_VERSION:STRING=3.0.0 -DENABLE_PLUGINS:BOOL=OFF -DENABLE_FRONTEND:BOOL=OFF
       -DOBS_VERSION_OVERRIDE:STRING=${_obs_version} "-DCMAKE_PREFIX_PATH='${CMAKE_PREFIX_PATH}'" ${_is_fresh}
-      ${_cmake_extra}
+      -DCMAKE_COMPILE_WARNING_AS_ERROR:BOOL=OFF ${_cmake_extra}
     RESULT_VARIABLE _process_result
-    COMMAND_ERROR_IS_FATAL ANY
-    OUTPUT_QUIET
+    OUTPUT_VARIABLE _process_output
+    ERROR_VARIABLE _process_output
   )
+  _check_process_result("Configure ${label} (${arch})")
   message(STATUS "Configure ${label} (${arch}) - done")
 
   message(STATUS "Build ${label} (Debug - ${arch})")
@@ -81,9 +96,10 @@ function(_setup_obs_studio)
     COMMAND "${CMAKE_COMMAND}" --build build_${arch} --target obs-frontend-api --config Debug --parallel
     WORKING_DIRECTORY "${dependencies_dir}/${_obs_destination}"
     RESULT_VARIABLE _process_result
-    COMMAND_ERROR_IS_FATAL ANY
-    OUTPUT_QUIET
+    OUTPUT_VARIABLE _process_output
+    ERROR_VARIABLE _process_output
   )
+  _check_process_result("Build ${label} (Debug - ${arch})")
   message(STATUS "Build ${label} (Debug - ${arch}) - done")
 
   message(STATUS "Build ${label} (Release - ${arch})")
@@ -91,10 +107,11 @@ function(_setup_obs_studio)
     COMMAND "${CMAKE_COMMAND}" --build build_${arch} --target obs-frontend-api --config Release --parallel
     WORKING_DIRECTORY "${dependencies_dir}/${_obs_destination}"
     RESULT_VARIABLE _process_result
-    COMMAND_ERROR_IS_FATAL ANY
-    OUTPUT_QUIET
+    OUTPUT_VARIABLE _process_output
+    ERROR_VARIABLE _process_output
   )
-  message(STATUS "Build ${label} (Reelase - ${arch}) - done")
+  _check_process_result("Build ${label} (Release - ${arch})")
+  message(STATUS "Build ${label} (Release - ${arch}) - done")
 
   message(STATUS "Install ${label} (${arch})")
   execute_process(
@@ -102,17 +119,19 @@ function(_setup_obs_studio)
       "${CMAKE_COMMAND}" --install build_${arch} --component Development --config Debug --prefix "${dependencies_dir}"
     WORKING_DIRECTORY "${dependencies_dir}/${_obs_destination}"
     RESULT_VARIABLE _process_result
-    COMMAND_ERROR_IS_FATAL ANY
-    OUTPUT_QUIET
+    OUTPUT_VARIABLE _process_output
+    ERROR_VARIABLE _process_output
   )
+  _check_process_result("Install ${label} (Debug - ${arch})")
   execute_process(
     COMMAND
       "${CMAKE_COMMAND}" --install build_${arch} --component Development --config Release --prefix "${dependencies_dir}"
     WORKING_DIRECTORY "${dependencies_dir}/${_obs_destination}"
     RESULT_VARIABLE _process_result
-    COMMAND_ERROR_IS_FATAL ANY
-    OUTPUT_QUIET
+    OUTPUT_VARIABLE _process_output
+    ERROR_VARIABLE _process_output
   )
+  _check_process_result("Install ${label} (Release - ${arch})")
   message(STATUS "Install ${label} (${arch}) - done")
 endfunction()
 

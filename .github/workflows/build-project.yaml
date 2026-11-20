@@ -73,7 +73,7 @@ jobs:
 
   macos-build:
     name: Build for macOS 🍏
-    runs-on: macos-15
+    runs-on: macos-26
     needs: check-event
     defaults:
       run:
@@ -90,8 +90,19 @@ jobs:
           : Set Up Environment 🔧
           if (( ${+RUNNER_DEBUG} )) setopt XTRACE
 
-          print '::group::Enable Xcode 16.1'
-          sudo xcode-select --switch /Applications/Xcode_16.1.0.app/Contents/Developer
+          # OBS 33 requires Xcode 26.5+ / macOS 26.5 SDK: select the newest stable Xcode 26
+          # installed on the runner (CMake verifies the exact minimum during configure).
+          print '::group::Enable Xcode 26'
+          local -a xcode_apps=(/Applications/Xcode_26.*.app(N-/nOn))
+          xcode_apps=(${xcode_apps:#*[Bb]eta*})
+          if (( ! #xcode_apps )) {
+            print '::error::No stable Xcode 26 installation found on this runner (OBS 33 requires Xcode 26.5+)'
+            ls -d /Applications/Xcode*.app
+            exit 1
+          }
+          sudo xcode-select --switch ${xcode_apps[1]}/Contents/Developer
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-platform-version
           print '::endgroup::'
 
           print '::group::Clean Homebrew Environment'
