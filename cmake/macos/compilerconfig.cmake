@@ -101,3 +101,11 @@ if(ENABLE_COMPILER_TRACE)
   )
   add_link_options(LINKER:-print_statistics)
 endif()
+
+# AUTOMOC runs the compiler without any target flags to generate moc_predefs.h. Inside an Xcode 26.5+
+# script phase the environment exports *_DEPLOYMENT_TARGET for every Apple platform (tvOS, visionOS,
+# DriverKit, ...), which clang rejects as "conflicting deployment targets". An explicit macOS version
+# flag makes clang ignore those environment variables.
+if(CMAKE_CXX_COMPILER_PREDEFINES_COMMAND AND CMAKE_OSX_DEPLOYMENT_TARGET)
+  list(APPEND CMAKE_CXX_COMPILER_PREDEFINES_COMMAND "-mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+endif()
